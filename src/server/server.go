@@ -64,12 +64,12 @@ func createUser(isConnected bool, c net.Conn, username string) *User {
 }
 
 func evalMessage(message helper.Message, user *User) {
+	message.From = user.username
 	if strings.HasPrefix(message.Command, "-c") {
 		connectTo(user, message.Command)
 	} else {
 		switch message.Command {
 		case "Message", "Encrypted":
-			message.From = user.username
 			userMessage(message, user)
 		case "-g":
 			getUsers(user)
@@ -110,14 +110,20 @@ func getUsers(user *User) {
 }
 
 func disconnect(user *User) {
-	userTo := user.connectedTo.connectedTo
-	mess := fmt.Sprintf("%s left", user.username)
-	message := helper.CreateMessage([]byte(mess), "Server")
-	sendMessage(*message, userTo)
-	user.connectedTo.connectedTo = nil
-	user.connectedTo = nil
-	user.isConnected = false
-	userTo.isConnected = false
+	userDisconnect(user.connectedTo)
+	userDisconnect(user)
+}
+
+func userDisconnect(user *User) {
+	if user.isConnected {
+		message := helper.CreateMessage([]byte("Disconnected from user"), "Server")
+		sendMessage(*message, user)
+		user.connectedTo = nil
+		user.isConnected = false
+	} else {
+		message := helper.CreateMessage([]byte("Not connected to anyone"), "Server")
+		sendMessage(*message, user)
+	}
 }
 
 func connectTo(user *User, message string) {

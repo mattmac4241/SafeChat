@@ -88,6 +88,7 @@ func evalMessage(message helper.Message, c net.Conn) {
 	case "Server", "Message":
 		serverMessage(string(message.Message))
 	case "SendKey":
+		fmt.Println("Now connected")
 		sendKey(message, c)
 	case "Key":
 		key(message)
