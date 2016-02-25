@@ -11,6 +11,9 @@ import (
 	"net"
 	"os"
 	"strings"
+
+	"golang.org/x/crypto/bcrypt"
+	"gopkg.in/mgo.v2/bson"
 )
 
 var (
@@ -18,6 +21,8 @@ var (
 	privateKey *rsa.PrivateKey
 	userKey    *rsa.PublicKey
 	connected  bool
+	logged_in  bool
+	connection net.Conn
 )
 
 func main() {
@@ -25,30 +30,35 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	} else {
+		connection = listener
 		privateKey = crypt.GenPrivateKey()
 		publicKey = crypt.GetPublicKey(privateKey)
-		go handleInput(listener)      // handle input
-		go handleConnection(listener) // handle connections
+		go handleInput()      // handle input
+		go handleConnection() // handle connections
 		for {
 
 		}
 		listener.Close()
 	}
-
 }
 
-func handleConnection(c net.Conn) {
+func handleConnection() {
 	for {
-		mess := helper.DecodeMessage(c)
-		evalMessage(mess, c)
+		mess := helper.DecodeMessage(connection)
+		evalMessage(mess)
 	}
 }
 
-func handleInput(c net.Conn) {
+func handleInput() {
+	fmt.Println("Log in or Register")
 	input := bufio.NewScanner(os.Stdin)
-	for input.Scan() {
-		text := input.Text()
-		helper.EncodeMessage(*evalInput(text), c)
+	if logged_in == true {
+		for input.Scan() {
+			text := input.Text()
+			helper.EncodeMessage(*evalInput(text), connection)
+		}
+	} else {
+		loginOrRegister()
 	}
 }
 
@@ -83,13 +93,13 @@ func isCommand(text string) bool {
 
 }
 
-func evalMessage(message helper.Message, c net.Conn) {
+func evalMessage(message helper.Message) {
 	switch message.Command {
 	case "Server", "Message":
 		serverMessage(string(message.Message))
 	case "SendKey":
 		fmt.Println("Now connected")
-		sendKey(message, c)
+		sendKey(message)
 	case "Key":
 		key(message)
 	case "Encrypted":
@@ -109,11 +119,11 @@ func serverMessage(message string) {
 	fmt.Println(message)
 }
 
-func sendKey(message helper.Message, c net.Conn) {
+func sendKey(message helper.Message) {
 	connected = true
 	mess := helper.CreateMessage(nil, "Key")
 	mess.Key = publicKey
-	helper.EncodeMessage(*mess, c)
+	helper.EncodeMessage(*mess, connection)
 }
 
 func key(message helper.Message) {
@@ -130,11 +140,57 @@ func createListener(args []string) (net.Conn, error) {
 	} else {
 		server := args[1] // get the server to connect to
 		port := args[2]   // get the port number
-		connection := fmt.Sprintf("%s:%s", server, port)
-		listener, err := net.Dial("tcp", connection)
+		conn := fmt.Sprintf("%s:%s", server, port)
+		listener, err := net.Dial("tcp", conn)
 		if err != nil {
 			log.Fatal(err)
 		}
 		return listener, nil
 	}
+}
+
+func loginOrRegister() {
+	reader := bufio.NewReader(os.Stdin)
+	command, _ := reader.ReadString('\n')
+	command = strings.ToLower(command)
+	command = strings.TrimSpace(command)
+	if command == "login" || command == "register" {
+		fmt.Print("Enter username: ")
+		username, _ := reader.ReadString('\n')
+		username = strings.TrimSpace(username)
+		fmt.Print("Enter password: ")
+		password, _ := reader.ReadString('\n')
+		password = strings.TrimSpace(password)
+		if command == "login" {
+			login(username, password)
+		} else {
+			register(username, password)
+		}
+
+	} else {
+		fmt.Println("Not valid")
+		loginOrRegister()
+	}
+}
+
+func login(username, password string) {
+	cred := helper.Credential{username, []byte(password)}
+	fmt.Println(cred)
+	data, err := bson.Marshal(cred)
+	if err != nil {
+		panic(err)
+	}
+	message := helper.CreateMessage(data, "Login")
+	helper.EncodeMessage(*message, connection)
+}
+
+func register(username, password string) {
+	hashed, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	cred := helper.Credential{username, hashed}
+	data, err := bson.Marshal(cred)
+	if err != nil {
+		panic(err)
+	}
+	message := helper.CreateMessage(data, "Register")
+	helper.EncodeMessage(*message, connection)
 }

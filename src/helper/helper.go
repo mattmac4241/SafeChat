@@ -13,6 +13,11 @@ type Message struct {
 	From    string
 }
 
+type Credential struct {
+	Username string
+	Password []byte
+}
+
 func EncodeMessage(message Message, c net.Conn) {
 	encoder := gob.NewEncoder(c)
 	encoder.Encode(message)

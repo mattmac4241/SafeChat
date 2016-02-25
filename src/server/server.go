@@ -1,11 +1,15 @@
 package main
 
 import (
+	dbm "database_manager"
 	"fmt"
 	"helper"
 	"log"
 	"net"
 	"strings"
+
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 type User struct {
@@ -18,6 +22,7 @@ type User struct {
 var (
 	users     map[string]*User
 	userIndex int
+	dbCol     *mgo.Collection
 )
 
 func main() {
@@ -27,6 +32,15 @@ func main() {
 		log.Fatal(err)
 	}
 	users = make(map[string]*User)
+
+	session, err := mgo.Dial("mongodb://matt:home222@127.0.01:27017/test")
+	defer session.Close()
+	if err != nil {
+		panic(err)
+	}
+	// Optional. Switch the session to a monotonic behavior.
+	session.SetMode(mgo.Monotonic, true)
+	dbCol = session.DB("test").C("users")
 
 	for {
 		userIndex += 1
@@ -49,7 +63,7 @@ func handleConn(c net.Conn) {
 		if message.Command == "" {
 			break
 		}
-		evalMessage(message, user)
+		evalMessage(message, user, c)
 	}
 	c.Close()
 
@@ -63,7 +77,7 @@ func createUser(isConnected bool, c net.Conn, username string) *User {
 	return user
 }
 
-func evalMessage(message helper.Message, user *User) {
+func evalMessage(message helper.Message, user *User, c net.Conn) {
 	message.From = user.username
 	if strings.HasPrefix(message.Command, "-c") {
 		connectTo(user, message.Command)
@@ -73,11 +87,14 @@ func evalMessage(message helper.Message, user *User) {
 			userMessage(message, user)
 		case "-g":
 			getUsers(user)
-
 		case "-d":
 			disconnect(user)
 		case "Key":
 			userMessage(message, user)
+		case "Login":
+			login(message, c)
+		case "Register":
+			register(message, c)
 		default:
 			message := helper.CreateMessage([]byte("Not a valid command"), "Server")
 			sendMessage(*message, user)
@@ -174,4 +191,23 @@ func connectUsers(user1, user2 *User) {
 	keyMessage := helper.CreateMessage([]byte("Send Key"), "SendKey")
 	messageMultiUsers(*keyMessage, userSlice)
 
+}
+
+func login(message helper.Message, c net.Conn) {
+	cred := new(helper.Credential)
+	bson.Unmarshal(message.Message, cred)
+	fmt.Println(cred)
+}
+
+func register(message helper.Message, c net.Conn) {
+	cred := new(helper.Credential)
+	bson.Unmarshal(message.Message, cred)
+	if dbm.IsUser(cred.Username, dbCol) {
+		mess := helper.CreateMessage([]byte("Username already taken"), "Server")
+		helper.EncodeMessage(*mess, c)
+	} else {
+		dbm.InsertUser(cred.Username, string(cred.Password), dbCol)
+		mess := helper.CreateMessage([]byte("Registered"), "Register")
+		helper.EncodeMessage(*mess, c)
+	}
 }
